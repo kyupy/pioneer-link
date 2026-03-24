@@ -1,0 +1,9 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Admin SDK bypasses rules. These are for future LIFF/client access.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
