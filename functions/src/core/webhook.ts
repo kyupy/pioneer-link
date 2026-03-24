@@ -2,9 +2,9 @@ import { Hono } from "hono";
 import { validateSignature } from "@line/bot-sdk";
 import type { WebhookEvent } from "@line/bot-sdk";
 import { resolveOrg } from "./tenant-resolver";
-import { resolveUser } from "./user-service";
 import { getLineClient } from "./line-client";
-import { route } from "./router";
+import { getEnabledPlugins } from "./plugin-loader";
+import { orgDb } from "../shared/db";
 
 const isEmulator = process.env.FUNCTIONS_EMULATOR === "true";
 
@@ -27,19 +27,25 @@ webhook.post("/:channelId", async (c) => {
   }
 
   // 3. Parse events
-  const parsed = JSON.parse(body) as { events: WebhookEvent[] };
-  const events = parsed.events;
+  const { events } = JSON.parse(body) as { events: WebhookEvent[] };
 
-  // 4. Process each event
+  // 4. Dispatch each event to enabled plugins (first handler wins)
+  const plugins = getEnabledPlugins(org);
   const lineClient = getLineClient(org);
+  const db = orgDb(org.id);
 
   for (const event of events) {
     try {
-      const userId = event.source?.userId;
-      if (!userId) continue;
-
-      const { user, member } = await resolveUser(userId, org.id, lineClient);
-      await route(event, org, user, member);
+      for (const plugin of plugins) {
+        const handled = await plugin.handle({
+          orgId: org.id,
+          org,
+          event,
+          lineClient,
+          db,
+        });
+        if (handled) break;
+      }
     } catch (err) {
       console.error(`Error processing event for org ${org.id}:`, err);
     }
